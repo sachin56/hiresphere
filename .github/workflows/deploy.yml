@@ -1,0 +1,200 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: hiresphere/api
+  EKS_CLUSTER: hiresphere-production
+  K8S_NAMESPACE: hiresphere
+
+jobs:
+  # ── Test ──────────────────────────────────────────────────────────────────
+  test:
+    name: PHP Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: hiresphere_test
+          POSTGRES_USER: hiresphere
+          POSTGRES_PASSWORD: secret
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_pgsql, mbstring, xml, ctype, json, bcmath
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Copy .env
+        run: cp .env.example .env
+
+      - name: Generate app key
+        run: php artisan key:generate
+
+      - name: Configure test DB
+        run: |
+          echo "DB_CONNECTION=pgsql" >> .env
+          echo "DB_HOST=127.0.0.1" >> .env
+          echo "DB_PORT=5432" >> .env
+          echo "DB_DATABASE=hiresphere_test" >> .env
+          echo "DB_USERNAME=hiresphere" >> .env
+          echo "DB_PASSWORD=secret" >> .env
+
+      - name: Run migrations
+        run: php artisan migrate --force
+
+      - name: Run tests
+        run: php artisan test --parallel
+
+  # ── Build & Push ─────────────────────────────────────────────────────────
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+      image-uri: ${{ steps.build-push.outputs.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+
+  # ── Deploy ────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EKS
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Login to ECR (for image pull verification)
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deploy namespace + config
+        run: |
+          kubectl apply -f kubernetes/namespace.yaml
+          kubectl apply -f kubernetes/configmaps/
+
+      - name: Update deployment image
+        run: |
+          kubectl set image deployment/hiresphere-api \
+            api=${{ needs.build.outputs.image-uri }} \
+            -n ${{ env.K8S_NAMESPACE }}
+
+      - name: Apply remaining manifests
+        run: |
+          kubectl apply -f kubernetes/services/
+          kubectl apply -f kubernetes/ingress/
+          kubectl apply -f kubernetes/hpa/
+
+      - name: Run database migrations
+        run: |
+          kubectl run db-migrate \
+            --image=${{ needs.build.outputs.image-uri }} \
+            --restart=Never \
+            --namespace=${{ env.K8S_NAMESPACE }} \
+            --env="RUN_MIGRATIONS=true" \
+            --command -- php artisan migrate --force
+          kubectl wait --for=condition=complete job/db-migrate \
+            -n ${{ env.K8S_NAMESPACE }} --timeout=120s || \
+          kubectl wait --for=condition=complete pod/db-migrate \
+            -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+          kubectl delete pod db-migrate -n ${{ env.K8S_NAMESPACE }} --ignore-not-found
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/hiresphere-api \
+            -n ${{ env.K8S_NAMESPACE }} --timeout=300s
+
+      - name: Verify health
+        run: |
+          kubectl get pods -n ${{ env.K8S_NAMESPACE }}
+          ALB_DNS=$(kubectl get ingress hiresphere-ingress \
+            -n ${{ env.K8S_NAMESPACE }} \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "ALB DNS: $ALB_DNS"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deployment failed — rolling back"
+          kubectl rollout undo deployment/hiresphere-api -n ${{ env.K8S_NAMESPACE }}

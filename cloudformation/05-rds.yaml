@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: HireSphere RDS PostgreSQL (Multi-AZ for production)
+
+Parameters:
+  ProjectName:
+    Type: String
+  Environment:
+    Type: String
+  DBPassword:
+    Type: String
+    NoEcho: true
+  VpcId:
+    Type: String
+  PrivateSubnet1:
+    Type: String
+  PrivateSubnet2:
+    Type: String
+  DBSecurityGroupId:
+    Type: String
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub ${ProjectName} RDS Subnet Group
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-db-subnet-group
+
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: !Sub ${ProjectName} PostgreSQL Parameters
+      Family: postgres16
+      Parameters:
+        log_connections: '1'
+        log_disconnections: '1'
+        log_statement: ddl
+        max_connections: '200'
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub ${ProjectName}-${Environment}-db
+      DBInstanceClass: !If [IsProd, db.t3.medium, db.t3.micro]
+      Engine: postgres
+      EngineVersion: '16.2'
+      MasterUsername: hiresphere_user
+      MasterUserPassword: !Ref DBPassword
+      DBName: hiresphere
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DBParameterGroupName: !Ref DBParameterGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroupId
+      AllocatedStorage: !If [IsProd, '100', '20']
+      StorageType: gp3
+      StorageEncrypted: true
+      MultiAZ: !If [IsProd, true, false]
+      BackupRetentionPeriod: !If [IsProd, 7, 1]
+      DeletionProtection: !If [IsProd, true, false]
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, production]
+
+Outputs:
+  DBEndpoint:
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${ProjectName}-DBEndpoint
+  DBPort:
+    Value: !GetAtt RDSInstance.Endpoint.Port
+  DBName:
+    Value: hiresphere

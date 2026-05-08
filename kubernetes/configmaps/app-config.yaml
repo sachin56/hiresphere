@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hiresphere-config
+  namespace: hiresphere
+  labels:
+    app: hiresphere
+data:
+  APP_NAME: "HireSphere"
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  APP_URL: "https://api.hiresphere.io"
+  DB_CONNECTION: "pgsql"
+  DB_PORT: "5432"
+  DB_DATABASE: "hiresphere"
+  CACHE_STORE: "redis"
+  REDIS_PORT: "6379"
+  QUEUE_CONNECTION: "sqs"
+  FILESYSTEM_DISK: "s3"
+  LOG_CHANNEL: "stderr"
+  LOG_LEVEL: "warning"
+  AWS_DEFAULT_REGION: "us-east-1"
+  DYNAMODB_MESSAGES_TABLE: "hiresphere-production-messages"
+  DYNAMODB_CONVERSATIONS_TABLE: "hiresphere-production-conversations"
+  SQS_QUEUE: "hiresphere-production-events.fifo"
+  MAIL_MAILER: "ses"
+  MAIL_FROM_ADDRESS: "noreply@hiresphere.io"
+  MAIL_FROM_NAME: "HireSphere"

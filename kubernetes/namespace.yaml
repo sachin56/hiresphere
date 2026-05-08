@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hiresphere
+  labels:
+    app: hiresphere
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hiresphere-sa
+  namespace: hiresphere
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/hiresphere-production-eks-node-role

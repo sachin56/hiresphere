@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: HireSphere AWS Amplify Hosting (web frontend placeholder)
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [development, staging, production]
+  GitHubRepository:
+    Type: String
+    Description: Full GitHub repo path (owner/repo)
+    Default: hiresphere/platform
+  GitHubBranch:
+    Type: String
+    Default: main
+  GitHubAccessToken:
+    Type: String
+    NoEcho: true
+    Description: GitHub personal access token for Amplify source connection
+  ApiBaseUrl:
+    Type: String
+    Description: Public API URL (API Gateway or ALB)
+  CognitoUserPoolId:
+    Type: String
+  CognitoClientId:
+    Type: String
+  CognitoRegion:
+    Type: String
+    Default: us-east-1
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, production]
+
+Resources:
+
+  AmplifyServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub hiresphere-${Environment}-amplify-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: amplify.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess-Amplify
+
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: !Sub hiresphere-${Environment}
+      Repository: !Sub https://github.com/${GitHubRepository}
+      AccessToken: !Ref GitHubAccessToken
+      IAMServiceRole: !GetAtt AmplifyServiceRole.Arn
+      Description: HireSphere interview simulation platform
+      EnvironmentVariables:
+        - Name: VITE_APP_NAME
+          Value: HireSphere
+        - Name: VITE_API_BASE_URL
+          Value: !Ref ApiBaseUrl
+        - Name: VITE_COGNITO_REGION
+          Value: !Ref CognitoRegion
+        - Name: VITE_COGNITO_USER_POOL_ID
+          Value: !Ref CognitoUserPoolId
+        - Name: VITE_COGNITO_CLIENT_ID
+          Value: !Ref CognitoClientId
+        - Name: NODE_ENV
+          Value: !If [IsProd, production, development]
+      BuildSpec: |
+        version: 1
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - npm ci
+            build:
+              commands:
+                - npm run build
+          artifacts:
+            baseDirectory: public/build
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - node_modules/**/*
+      CustomRules:
+        - Source: '</^[^.]+$|\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json)$)([^.]+$)/>'
+          Target: /index.html
+          Status: '200'
+        - Source: /api/<*>
+          Target: !Sub ${ApiBaseUrl}/api/<*>
+          Status: '200'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref GitHubBranch
+      EnableAutoBuild: true
+      EnablePullRequestPreview: !If [IsProd, false, true]
+      Stage: !If [IsProd, PRODUCTION, DEVELOPMENT]
+      EnvironmentVariables:
+        - Name: AMPLIFY_DIFF_DEPLOY
+          Value: 'false'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  AmplifyAppId:
+    Value: !GetAtt AmplifyApp.AppId
+    Export:
+      Name: !Sub ${AWS::StackName}-AmplifyAppId
+
+  AmplifyDefaultDomain:
+    Value: !Sub ${GitHubBranch}.${AmplifyApp.DefaultDomain}
+    Export:
+      Name: !Sub ${AWS::StackName}-AmplifyDomain
+
+  AmplifyConsoleUrl:
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/amplify/home#/${AmplifyApp.AppId}

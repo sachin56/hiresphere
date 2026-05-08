@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: HireSphere Security Groups
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [development, staging, production]
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  VpcCidr:
+    Type: String
+
+Resources:
+
+  # ── ALB Security Group ────────────────────────────────────────────────────
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HireSphere ALB - allows HTTP/HTTPS from internet
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from internet
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub hiresphere-${Environment}-alb-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── EKS Cluster Security Group ───────────────────────────────────────────
+  EKSClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HireSphere EKS cluster control-plane
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EKSNodeSecurityGroup
+          Description: Node kubelets to API server
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub hiresphere-${Environment}-eks-cluster-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── EKS Node Security Group ──────────────────────────────────────────────
+  EKSNodeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HireSphere EKS worker nodes
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 1025
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref EKSClusterSecurityGroup
+          Description: Control-plane to nodes
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EKSClusterSecurityGroup
+          Description: Control-plane to nodes (443)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: ALB to pods
+        - IpProtocol: -1
+          SourceSecurityGroupId: !Ref EKSNodeSecurityGroup
+          Description: Node-to-node communication
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound (ECR, S3, AWS APIs)
+      Tags:
+        - Key: Name
+          Value: !Sub hiresphere-${Environment}-eks-node-sg
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: !Sub kubernetes.io/cluster/hiresphere-${Environment}
+          Value: owned
+
+  # ── Self-referencing ingress rule (separate to avoid circular ref) ────────
+  NodeSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EKSNodeSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref EKSNodeSecurityGroup
+      Description: Node-to-node all traffic
+
+  # ── RDS Security Group ───────────────────────────────────────────────────
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HireSphere RDS PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EKSNodeSecurityGroup
+          Description: EKS nodes to Postgres
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub hiresphere-${Environment}-rds-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── ElastiCache (Redis) Security Group ──────────────────────────────────
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HireSphere ElastiCache Redis
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref EKSNodeSecurityGroup
+          Description: EKS nodes to Redis
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub hiresphere-${Environment}-redis-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ALBSecurityGroupId:
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-ALBSecurityGroupId
+
+  EKSClusterSecurityGroupId:
+    Value: !Ref EKSClusterSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-EKSClusterSecurityGroupId
+
+  EKSNodeSecurityGroupId:
+    Value: !Ref EKSNodeSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-EKSNodeSecurityGroupId
+
+  RDSSecurityGroupId:
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-RDSSecurityGroupId
+
+  RedisSecurityGroupId:
+    Value: !Ref RedisSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-RedisSecurityGroupId

@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  HireSphere Platform - Master Stack
+  Deploys the complete cloud infrastructure for the HireSphere
+  interview simulation platform using nested stacks.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+  ProjectName:
+    Type: String
+    Default: hiresphere
+  S3TemplateBucket:
+    Type: String
+    Description: S3 bucket containing nested CloudFormation templates
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    Description: RDS master password
+  CognitoCallbackURL:
+    Type: String
+    Default: https://app.hiresphere.io/auth/callback
+  AdminEmail:
+    Type: String
+    Description: Admin email for Cognito and SES
+
+Resources:
+  # ─── Networking ──────────────────────────────────────────────────────────────
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/01-vpc.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ─── Security Groups ─────────────────────────────────────────────────────────
+  SecurityStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: VPCStack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/02-security-groups.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+
+  # ─── Cognito (Auth) ───────────────────────────────────────────────────────────
+  CognitoStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/03-cognito.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        CallbackURL: !Ref CognitoCallbackURL
+        AdminEmail: !Ref AdminEmail
+
+  # ─── S3 Buckets ───────────────────────────────────────────────────────────────
+  S3Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/04-s3.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+
+  # ─── RDS PostgreSQL ───────────────────────────────────────────────────────────
+  RDSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityStack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/05-rds.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        DBPassword: !Ref DBPassword
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        PrivateSubnet1: !GetAtt VPCStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2: !GetAtt VPCStack.Outputs.PrivateSubnet2Id
+        DBSecurityGroupId: !GetAtt SecurityStack.Outputs.DBSecurityGroupId
+
+  # ─── DynamoDB ────────────────────────────────────────────────────────────────
+  DynamoDBStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/06-dynamodb.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+
+  # ─── SQS & SNS ───────────────────────────────────────────────────────────────
+  MessagingStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/07-sqs-sns.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+
+  # ─── EKS Cluster ─────────────────────────────────────────────────────────────
+  EKSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [VPCStack, SecurityStack]
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/08-eks.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        PublicSubnet1: !GetAtt VPCStack.Outputs.PublicSubnet1Id
+        PublicSubnet2: !GetAtt VPCStack.Outputs.PublicSubnet2Id
+        PrivateSubnet1: !GetAtt VPCStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2: !GetAtt VPCStack.Outputs.PrivateSubnet2Id
+        EKSSecurityGroupId: !GetAtt SecurityStack.Outputs.EKSSecurityGroupId
+
+  # ─── API Gateway ─────────────────────────────────────────────────────────────
+  APIGatewayStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: CognitoStack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/09-api-gateway.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        CognitoUserPoolArn: !GetAtt CognitoStack.Outputs.UserPoolArn
+
+  # ─── Amplify (Frontend) ───────────────────────────────────────────────────────
+  AmplifyStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: CognitoStack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${S3TemplateBucket}/cloudformation/10-amplify.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        CognitoUserPoolId: !GetAtt CognitoStack.Outputs.UserPoolId
+        CognitoClientId: !GetAtt CognitoStack.Outputs.UserPoolClientId
+
+Outputs:
+  VpcId:
+    Value: !GetAtt VPCStack.Outputs.VpcId
+  RDSEndpoint:
+    Value: !GetAtt RDSStack.Outputs.DBEndpoint
+  EKSClusterName:
+    Value: !GetAtt EKSStack.Outputs.ClusterName
+  CognitoUserPoolId:
+    Value: !GetAtt CognitoStack.Outputs.UserPoolId
+  CognitoClientId:
+    Value: !GetAtt CognitoStack.Outputs.UserPoolClientId
+  APIGatewayURL:
+    Value: !GetAtt APIGatewayStack.Outputs.ApiUrl
+  AmplifyAppURL:
+    Value: !GetAtt AmplifyStack.Outputs.AppURL

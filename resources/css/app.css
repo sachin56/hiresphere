@@ -1,0 +1,174 @@
+@import "bootstrap/dist/css/bootstrap.min.css";
+
+/* ── Custom HireSphere overrides ── */
+:root {
+    --hs-primary: #4f46e5;
+    --hs-primary-dark: #4338ca;
+    --bs-primary: #4f46e5;
+    --bs-primary-rgb: 79, 70, 229;
+    --bs-link-color: #4f46e5;
+    --bs-link-hover-color: #4338ca;
+}
+
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background-color: #f8f9fa;
+}
+
+/* Sidebar */
+.sidebar {
+    width: 260px;
+    min-height: 100vh;
+    background: #1e1b4b;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    transition: transform .25s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-brand {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.sidebar-nav .nav-link {
+    color: rgba(255,255,255,.65);
+    border-radius: 8px;
+    padding: .55rem 1rem;
+    margin: 2px 8px;
+    font-size: .875rem;
+    display: flex;
+    align-items: center;
+    gap: .625rem;
+    transition: background .15s, color .15s;
+}
+
+.sidebar-nav .nav-link:hover,
+.sidebar-nav .nav-link.active {
+    background: rgba(255,255,255,.12);
+    color: #fff;
+}
+
+.sidebar-nav .nav-link svg {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+}
+
+.main-content {
+    margin-left: 260px;
+    min-height: 100vh;
+}
+
+@media (max-width: 991.98px) {
+    .sidebar { transform: translateX(-100%); }
+    .sidebar.show { transform: translateX(0); }
+    .main-content { margin-left: 0; }
+}
+
+/* Stat cards */
+.stat-card {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+}
+
+/* Form inputs */
+.form-control:focus, .form-select:focus {
+    border-color: var(--hs-primary);
+    box-shadow: 0 0 0 .25rem rgba(79,70,229,.18);
+}
+
+.btn-primary {
+    background-color: var(--hs-primary);
+    border-color: var(--hs-primary);
+}
+
+.btn-primary:hover, .btn-primary:focus {
+    background-color: var(--hs-primary-dark);
+    border-color: var(--hs-primary-dark);
+}
+
+.btn-outline-primary {
+    color: var(--hs-primary);
+    border-color: var(--hs-primary);
+}
+
+.btn-outline-primary:hover {
+    background-color: var(--hs-primary);
+    border-color: var(--hs-primary);
+}
+
+/* Role selector cards */
+.role-card {
+    border: 2px solid #dee2e6;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s, box-shadow .15s;
+    padding: 1rem;
+    text-align: center;
+}
+
+.role-card:hover { border-color: #a5b4fc; }
+.role-card.selected {
+    border-color: var(--hs-primary);
+    background: #eef2ff;
+    box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+}
+
+/* Password strength bar */
+.strength-bar {
+    height: 4px;
+    border-radius: 2px;
+    flex: 1;
+    background: #e9ecef;
+    transition: background .3s;
+}
+
+/* Auth split layout */
+.auth-panel-left {
+    background: linear-gradient(135deg, #4f46e5 0%, #6d28d9 100%);
+    min-height: 100vh;
+}
+
+/* Badge colors */
+.badge-candidate { background: #dbeafe; color: #1e40af; }
+.badge-interviewer { background: #d1fae5; color: #065f46; }
+.badge-admin { background: #fef3c7; color: #92400e; }
+
+/* Chat bubbles */
+.min-w-0 { min-width: 0; }
+.cursor-pointer { cursor: pointer; }
+.pick-card {
+    border: 2px solid #dee2e6;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+button.pick-card {
+    background: #fff;
+    width: 100%;
+    display: block;
+}
+.pick-card.selected {
+    border-color: var(--hs-primary);
+    background: #eef2ff;
+    color: var(--hs-primary);
+}
+
+.chat-bubble-out {
+    background: var(--hs-primary);
+    color: #fff;
+    border-radius: 18px 18px 4px 18px;
+    max-width: 72%;
+}
+
+.chat-bubble-in {
+    background: #f1f3f5;
+    color: #212529;
+    border-radius: 18px 18px 18px 4px;
+    max-width: 72%;
+}

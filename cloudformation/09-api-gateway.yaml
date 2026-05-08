@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: HireSphere HTTP API Gateway with Cognito JWT authorizer
+
+Parameters:
+  ProjectName:
+    Type: String
+  Environment:
+    Type: String
+  CognitoUserPoolArn:
+    Type: String
+
+Resources:
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-api
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+          - X-Amz-Date
+          - X-CSRF-Token
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+          - PATCH
+        AllowOrigins:
+          - '*'
+        MaxAge: 3600
+      Tags:
+        Project: !Ref ProjectName
+
+  CognitoAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref HttpApi
+      AuthorizerType: JWT
+      Name: CognitoJWTAuthorizer
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        Audience:
+          - !Sub '{{resolve:ssm:/${ProjectName}/${Environment}/cognito-client-id}}'
+        Issuer: !Sub
+          - https://cognito-idp.us-east-1.amazonaws.com/${PoolId}
+          - PoolId: !Sub '{{resolve:ssm:/${ProjectName}/${Environment}/cognito-pool-id}}'
+
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: !Ref Environment
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 1000
+        ThrottlingRateLimit: 500
+      AccessLogSettings:
+        DestinationArn: !GetAtt APILogGroup.Arn
+
+  APILogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/${ProjectName}-${Environment}
+      RetentionInDays: 14
+
+  # VPC Link to reach EKS pods via NLB
+  VpcLink:
+    Type: AWS::ApiGatewayV2::VpcLink
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-vpclink
+      SecurityGroupIds: []
+      SubnetIds: []
+
+  # Route — proxy all /api/* to EKS service
+  ProxyIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: HTTP_PROXY
+      IntegrationMethod: ANY
+      IntegrationUri: !Sub 'http://${ProjectName}-api.default.svc.cluster.local:80/{proxy}'
+      PayloadFormatVersion: '1.0'
+      ConnectionType: VPC_LINK
+      ConnectionId: !Ref VpcLink
+
+  ProxyRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'ANY /{proxy+}'
+      Target: !Sub integrations/${ProxyIntegration}
+      AuthorizationType: NONE
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${HttpApi}.execute-api.us-east-1.amazonaws.com/${Environment}
+    Export:
+      Name: !Sub ${ProjectName}-ApiGatewayUrl
+  ApiId:
+    Value: !Ref HttpApi
