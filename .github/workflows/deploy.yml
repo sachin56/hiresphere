@@ -171,7 +171,7 @@ jobs:
       - name: Run database migrations
         run: |
           kubectl run db-migrate \
-            --image=${{ needs.build.outputs.image-uri }} \
+            --image=053255739387.dkr.ecr.us-east-1.amazonaws.com/hiresphere/api:latest \
             --restart=Never \
             --namespace=${{ env.K8S_NAMESPACE }} \
             --env="RUN_MIGRATIONS=true" \
