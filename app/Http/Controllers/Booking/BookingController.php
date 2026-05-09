@@ -12,7 +12,7 @@ use App\Services\WebRTCService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 /**
  * @OA\Tag(name="Bookings", description="Interview session booking management")
@@ -149,7 +149,7 @@ class BookingController extends Controller
             ]);
         } catch (\Exception $e) {
             $booking->update(['status' => 'accepted']);
-            \Log::warning('WebRTC room creation failed: ' . $e->getMessage());
+            Log::warning('WebRTC room creation failed: ' . $e->getMessage());
         }
 
         $candidate   = User::find($booking->candidate_id);
@@ -225,6 +225,40 @@ class BookingController extends Controller
      *   security={{"bearerAuth":{}}},
      * )
      */
+    public function updateRoomUrl(Request $request, string $id): JsonResponse
+    {
+        $user    = $request->user();
+        $booking = Booking::where('interviewer_id', $user->id)->findOrFail($id);
+
+        $data = $request->validate([
+            'room_url' => 'required|url|max:500',
+        ]);
+
+        $booking->update([
+            'webrtc_room_url' => $data['room_url'],
+            'webrtc_room_id'  => $booking->webrtc_room_id ?: 'manual-' . $id,
+        ]);
+
+        return response()->json($booking->fresh());
+    }
+
+    /**
+     * @OA\Put(path="/api/bookings/{id}/complete", tags={"Bookings"}, summary="Mark a booking as completed", security={{"bearerAuth":{}}})
+     */
+    public function complete(Request $request, string $id): JsonResponse
+    {
+        $user    = $request->user();
+        $booking = Booking::where('interviewer_id', $user->id)->findOrFail($id);
+
+        if (!$booking->isAccepted()) {
+            return response()->json(['message' => 'Only accepted sessions can be marked as completed.'], 422);
+        }
+
+        $booking->update(['status' => 'completed']);
+
+        return response()->json($booking->fresh());
+    }
+
     public function joinSession(Request $request, string $id): JsonResponse
     {
         $user    = $request->user();

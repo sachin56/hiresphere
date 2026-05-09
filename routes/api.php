@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Booking\BookingController;
 use App\Http\Controllers\Evaluation\EvaluationController;
@@ -76,18 +77,29 @@ Route::middleware('cognito.auth')->group(function () {
         Route::put('/interviewers/{id}',              [InterviewerController::class, 'update']);
 
         // Availability
-        Route::post('/interviewer/availability',       [AvailabilityController::class, 'store']);
+        Route::get('/interviewer/availability',             [AvailabilityController::class, 'mySlots']);
+        Route::post('/interviewer/availability',            [AvailabilityController::class, 'store']);
         Route::delete('/interviewer/availability/{slotId}', [AvailabilityController::class, 'destroy']);
 
         // Booking actions
         Route::put('/bookings/{id}/accept',           [BookingController::class, 'accept']);
         Route::put('/bookings/{id}/reject',           [BookingController::class, 'reject']);
+        Route::put('/bookings/{id}/complete',         [BookingController::class, 'complete']);
+        Route::put('/bookings/{id}/room-url',         [BookingController::class, 'updateRoomUrl']);
 
         // Evaluations
         Route::post('/evaluations',                   [EvaluationController::class, 'store']);
 
         // Annotate submissions
         Route::put('/submissions/{id}/annotate',      [SubmissionController::class, 'annotate']);
+    });
+
+    // ── Admin-only Routes ─────────────────────────────────────────────────────
+    Route::middleware('role:admin')->prefix('admin')->group(function () {
+        Route::get('/interviewers/pending',        [AdminController::class, 'pendingInterviewers']);
+        Route::put('/interviewers/{id}/approve',   [AdminController::class, 'approveInterviewer']);
+        Route::put('/interviewers/{id}/reject',    [AdminController::class, 'rejectInterviewer']);
+        Route::get('/users',                       [AdminController::class, 'users']);
     });
 
     // ── Shared Authenticated Routes ───────────────────────────────────────────

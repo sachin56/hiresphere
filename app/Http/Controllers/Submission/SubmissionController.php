@@ -22,9 +22,15 @@ class SubmissionController extends Controller
     {
         $user = $request->user();
 
-        $query = $user->isCandidate()
-            ? Submission::where('candidate_id', $user->id)
-            : Submission::whereHas('booking', fn($q) => $q->where('interviewer_id', $user->id));
+        if ($user->isCandidate()) {
+            $query = Submission::where('candidate_id', $user->id);
+        } else {
+            $candidateIds = \App\Models\Booking::where('interviewer_id', $user->id)
+                ->whereNotIn('status', ['cancelled', 'rejected'])
+                ->pluck('candidate_id')
+                ->unique();
+            $query = Submission::whereIn('candidate_id', $candidateIds);
+        }
 
         if ($request->has('status')) {
             $query->where('status', $request->status);

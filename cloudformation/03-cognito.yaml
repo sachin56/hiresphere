@@ -46,10 +46,11 @@ Resources:
         Project: !Ref ProjectName
         Environment: !Ref Environment
 
+  # Server-side client (Laravel backend) — has secret, used with SECRET_HASH
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
-      ClientName: !Sub ${ProjectName}-${Environment}-client
+      ClientName: !Sub ${ProjectName}-${Environment}-server-client
       UserPoolId: !Ref UserPool
       GenerateSecret: true
       ExplicitAuthFlows:
@@ -63,6 +64,29 @@ Resources:
       LogoutURLs:
         - !Sub https://${ProjectName}.auth.us-east-1.amazoncognito.com/logout
       SupportedIdentityProviders: [COGNITO]
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [email, openid, profile]
+      AllowedOAuthFlowsUserPoolClient: true
+
+  # Browser/SPA client (React + Amplify) — no secret, safe for public use
+  WebAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${ProjectName}-${Environment}-web-client
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs:
+        - !Ref CallbackURL
+        - http://localhost:3000
+      LogoutURLs:
+        - !Ref CallbackURL
+        - http://localhost:3000
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [email, openid, profile]
       AllowedOAuthFlowsUserPoolClient: true
@@ -87,6 +111,13 @@ Resources:
       UserPoolId: !Ref UserPool
       Description: Interviewer users
 
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admins
+      UserPoolId: !Ref UserPool
+      Description: Platform administrators
+
 Outputs:
   UserPoolId:
     Value: !Ref UserPool
@@ -100,5 +131,9 @@ Outputs:
     Value: !Ref UserPoolClient
     Export:
       Name: !Sub ${ProjectName}-CognitoClientId
+  WebAppClientId:
+    Value: !Ref WebAppClient
+    Export:
+      Name: !Sub ${ProjectName}-CognitoWebClientId
   UserPoolDomain:
     Value: !Sub ${ProjectName}-${Environment}-auth.auth.us-east-1.amazoncognito.com

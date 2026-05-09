@@ -45,6 +45,26 @@ class AvailabilityController extends Controller
     }
 
     /**
+     * @OA\Get(
+     *   path="/api/interviewer/availability",
+     *   tags={"Availability"},
+     *   summary="List all slots for the authenticated interviewer (including past & booked)",
+     *   security={{"bearerAuth":{}}},
+     * )
+     */
+    public function mySlots(Request $request): JsonResponse
+    {
+        $user    = $request->user();
+        $profile = InterviewerProfile::where('user_id', $user->id)->firstOrFail();
+
+        $slots = $profile->availabilitySlots()
+            ->orderBy('start_time', 'desc')
+            ->get();
+
+        return response()->json($slots);
+    }
+
+    /**
      * @OA\Post(
      *   path="/api/interviewer/availability",
      *   tags={"Availability"},
