@@ -13,7 +13,7 @@ spec:
   selector:
     app: hiresphere
     component: api
-  type: ClusterIP
+  type: LoadBalancer
   ports:
     - protocol: TCP
       port: 80
