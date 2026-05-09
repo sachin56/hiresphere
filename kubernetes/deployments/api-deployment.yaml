@@ -27,7 +27,7 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: api
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/hiresphere/api:latest
+          image: 053255739387.dkr.ecr.us-east-1.amazonaws.com/hiresphere/api:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 80
