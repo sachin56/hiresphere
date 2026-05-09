@@ -166,9 +166,7 @@ jobs:
 
       - name: Update deployment image
         run: |
-          kubectl set image deployment/hiresphere-api \
-            api=${{ needs.build.outputs.image-uri }} \
-            -n ${{ env.K8S_NAMESPACE }}
+          kubectl rollout restart deployment/hiresphere-api -n ${{ env.K8S_NAMESPACE }}
 
       - name: Run database migrations
         run: |
