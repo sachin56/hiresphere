@@ -11,4 +11,4 @@ metadata:
   name: hiresphere-sa
   namespace: hiresphere
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/hiresphere-production-eks-node-role
+    eks.amazonaws.com/role-arn: arn:aws:iam::053255739387:role/hiresphere-production-eks-node-role
