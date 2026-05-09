@@ -51,7 +51,10 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg && \
         pcntl
 
 # Install Redis extension
-RUN pecl install redis && docker-php-ext-enable redis
+RUN apk add --no-cache --virtual .build-deps autoconf g++ make && \
+    pecl install redis && \
+    docker-php-ext-enable redis && \
+    apk del .build-deps
 
 WORKDIR /var/www/html
 
