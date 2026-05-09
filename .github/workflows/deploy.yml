@@ -157,17 +157,18 @@ jobs:
           kubectl apply -f kubernetes/namespace.yaml --validate=false
           kubectl apply -f kubernetes/configmaps/ --validate=false
 
+      - name: Apply all manifests
+        run: |
+          kubectl apply -f kubernetes/deployments/ --validate=false
+          kubectl apply -f kubernetes/services/ --validate=false
+          kubectl apply -f kubernetes/ingress/ --validate=false
+          kubectl apply -f kubernetes/hpa/ --validate=false
+
       - name: Update deployment image
         run: |
           kubectl set image deployment/hiresphere-api \
             api=${{ needs.build.outputs.image-uri }} \
             -n ${{ env.K8S_NAMESPACE }}
-
-      - name: Apply remaining manifests
-        run: |
-          kubectl apply -f kubernetes/services/
-          kubectl apply -f kubernetes/ingress/
-          kubectl apply -f kubernetes/hpa/
 
       - name: Run database migrations
         run: |
