@@ -170,15 +170,15 @@ jobs:
 
       - name: Run database migrations
         run: |
+          kubectl delete pod db-migrate -n ${{ env.K8S_NAMESPACE }} --ignore-not-found
           kubectl run db-migrate \
             --image=053255739387.dkr.ecr.us-east-1.amazonaws.com/hiresphere/api:latest \
             --restart=Never \
             --namespace=${{ env.K8S_NAMESPACE }} \
             --env="RUN_MIGRATIONS=true" \
             --command -- php artisan migrate --force
-          kubectl wait --for=condition=complete job/db-migrate \
-            -n ${{ env.K8S_NAMESPACE }} --timeout=120s || \
-          kubectl wait --for=condition=complete pod/db-migrate \
+          kubectl wait pod/db-migrate \
+            --for=jsonpath='{.status.phase}'=Succeeded \
             -n ${{ env.K8S_NAMESPACE }} --timeout=120s
           kubectl delete pod db-migrate -n ${{ env.K8S_NAMESPACE }} --ignore-not-found
 
