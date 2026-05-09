@@ -97,6 +97,11 @@ export const evaluationApi = {
   review: (bookingId, data) => api.post(`/bookings/${bookingId}/review`, data),
 };
 
+export const paymentApi = {
+  createCheckout: (bookingId)            => api.post(`/payments/checkout/${bookingId}`),
+  verify:         (bookingId, sessionId) => api.get(`/payments/verify/${bookingId}?session_id=${sessionId}`),
+};
+
 export const adminApi = {
   pendingInterviewers: ()   => api.get('/admin/interviewers/pending'),
   approve:             (id) => api.put(`/admin/interviewers/${id}/approve`),

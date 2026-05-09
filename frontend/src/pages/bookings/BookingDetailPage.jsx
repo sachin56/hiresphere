@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { api, bookingApi } from '../../api/client';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { api, bookingApi, paymentApi } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 
 const STATUS_BADGE = {
@@ -33,19 +33,65 @@ export default function BookingDetailPage() {
   const { isCandidate, isInterviewer } = useAuth();
   const navigate = useNavigate();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [booking,   setBooking]   = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [acting,    setActing]    = useState(false);
   const [error,     setError]     = useState(null);
   const [roomUrl,   setRoomUrl]   = useState('');
   const [urlSaving, setUrlSaving] = useState(false);
+  const [paying,        setPaying]        = useState(false);
+  const [verifying,     setVerifying]     = useState(false);
+
+  const paymentResult = searchParams.get('payment');
+  const pollRef = useRef(null);
+  const sessionId = searchParams.get('session_id');
 
   useEffect(() => {
     bookingApi.get(id)
-      .then(b => { setBooking(b); setRoomUrl(b?.webrtc_room_url || ''); })
+      .then(b => {
+        setBooking(b);
+        setRoomUrl(b?.webrtc_room_url || '');
+        if (paymentResult === 'success' && b.payment_status !== 'paid') {
+          verifyPayment();
+        }
+      })
       .catch(() => setError('Booking not found.'))
       .finally(() => setLoading(false));
-  }, [id]);
+
+    return () => clearTimeout(pollRef.current);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function verifyPayment() {
+    setVerifying(true);
+    try {
+      // Ask the backend to confirm with Stripe and update the DB immediately
+      const updated = await paymentApi.verify(id, sessionId);
+      setBooking(updated);
+      setVerifying(false);
+    } catch {
+      // Stripe said not paid yet — fall back to polling
+      pollForPaid(0);
+    }
+  }
+
+  function pollForPaid(attempt) {
+    if (attempt >= 6) { setVerifying(false); return; }
+    pollRef.current = setTimeout(async () => {
+      try {
+        const b = await bookingApi.get(id);
+        setBooking(b);
+        if (b.payment_status === 'paid') {
+          setVerifying(false);
+        } else {
+          pollForPaid(attempt + 1);
+        }
+      } catch {
+        setVerifying(false);
+      }
+    }, 3000);
+  }
 
   async function action(fn, redirectAfter) {
     setActing(true); setError(null);
@@ -71,6 +117,17 @@ export default function BookingDetailPage() {
     } finally { setUrlSaving(false); }
   }
 
+  async function handlePay() {
+    setPaying(true); setError(null);
+    try {
+      const { url } = await paymentApi.createCheckout(id);
+      window.location.href = url;
+    } catch (e) {
+      setError(e.data?.error || e.data?.message || 'Payment could not be started. Please try again.');
+      setPaying(false);
+    }
+  }
+
   async function handleJoin() {
     try {
       const res = await bookingApi.join(id);
@@ -91,11 +148,13 @@ export default function BookingDetailPage() {
 
   const other      = isCandidate ? booking.interviewer : booking.candidate;
   const typeIcon   = TYPE_ICON[booking.interview_type] || '📋';
-  const canJoin     = booking.status === 'accepted' && booking.webrtc_room_url;
+  const paymentRequired = booking.amount > 0 && booking.payment_status !== 'paid';
+  const canJoin     = booking.status === 'accepted' && booking.webrtc_room_url && (!isCandidate || !paymentRequired);
   const canAccept   = isInterviewer && booking.status === 'pending';
   const canReject   = isInterviewer && booking.status === 'pending';
   const canCancel   = booking.status === 'pending';
   const canComplete = isInterviewer && booking.status === 'accepted';
+  const canPay      = isCandidate && booking.status === 'accepted' && paymentRequired;
 
   return (
     <div style={{ maxWidth: 820 }}>
@@ -104,6 +163,25 @@ export default function BookingDetailPage() {
       </Link>
 
       {error && <div className="alert alert-error" style={{ marginBottom: 14 }}>{error}</div>}
+
+      {paymentResult === 'success' && (
+        <div className={`alert ${verifying ? 'alert-info' : 'alert-success'}`} style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>
+            {verifying
+              ? '⏳ Verifying payment, please wait…'
+              : '✅ Payment completed! Your session is confirmed.'}
+          </span>
+          {!verifying && (
+            <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '1rem' }} onClick={() => setSearchParams({})}>×</button>
+          )}
+        </div>
+      )}
+      {paymentResult === 'cancelled' && (
+        <div className="alert alert-warning" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Payment was cancelled. You can try again when ready.</span>
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '1rem' }} onClick={() => setSearchParams({})}>×</button>
+        </div>
+      )}
 
       {/* Hero */}
       <div className="bk-hero">
@@ -151,7 +229,19 @@ export default function BookingDetailPage() {
         </div>
         <div className="bk-info-cell">
           <div className="bk-info-label">Amount</div>
-          <div className="bk-info-value">{booking.amount_paid ? `$${booking.amount_paid}` : '—'}</div>
+          <div className="bk-info-value">{booking.amount ? `${booking.currency?.toUpperCase() || 'USD'} ${Number(booking.amount).toFixed(2)}` : '—'}</div>
+        </div>
+        <div className="bk-info-cell">
+          <div className="bk-info-label">Payment</div>
+          <div className="bk-info-value">
+            <span className={`badge ${
+              booking.payment_status === 'paid'     ? 'badge-success' :
+              booking.payment_status === 'refunded' ? 'badge-neutral' :
+              booking.payment_status === 'failed'   ? 'badge-error'   : 'badge-warning'
+            }`}>
+              {booking.payment_status || 'pending'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -163,8 +253,26 @@ export default function BookingDetailPage() {
         </div>
       )}
 
+      {/* Payment required callout */}
+      {isCandidate && booking.status === 'accepted' && paymentRequired && (
+        <div className="alert alert-warning" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: '1.2rem' }}>💳</span>
+          <div>
+            <strong>Payment required to join this session.</strong>
+            <div style={{ fontSize: '.85rem', marginTop: 2 }}>
+              Complete your payment of {booking.currency?.toUpperCase() || 'USD'} {Number(booking.amount).toFixed(2)} to unlock the session room.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Action bar */}
       <div className="bk-action-bar">
+        {canPay && (
+          <button className="btn btn-primary" disabled={paying} onClick={handlePay} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            💳 {paying ? 'Redirecting to Stripe…' : `Pay ${booking.currency?.toUpperCase() || 'USD'} ${Number(booking.amount).toFixed(2)}`}
+          </button>
+        )}
         {canJoin && (
           <button className="bk-btn-join" onClick={handleJoin}>
             🎥 Join Live Session

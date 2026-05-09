@@ -63,6 +63,10 @@ Route::middleware('cognito.auth')->group(function () {
 
     // ── Candidate-only Routes ─────────────────────────────────────────────────
     Route::middleware('role:candidate')->group(function () {
+        // Payments
+        Route::post('/payments/checkout/{bookingId}', [PaymentController::class, 'apiCheckout']);
+        Route::get('/payments/verify/{bookingId}',    [PaymentController::class, 'apiVerify']);
+
         // Bookings
         Route::post('/bookings',                  [BookingController::class, 'store']);
         Route::put('/bookings/{id}/cancel',       [BookingController::class, 'cancel']);

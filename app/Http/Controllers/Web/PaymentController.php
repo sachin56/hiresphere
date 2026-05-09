@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -109,6 +110,114 @@ class PaymentController extends Controller
         }
 
         return redirect()->route('bookings.show', $booking)->with('error', 'Payment was not completed.');
+    }
+
+    public function apiCheckout(string $bookingId): JsonResponse
+    {
+        $user = auth()->user();
+        $booking = Booking::with('interviewer')
+            ->where('candidate_id', $user->id)
+            ->findOrFail($bookingId);
+
+        if ($booking->payment_status === 'paid') {
+            return response()->json(['error' => 'This booking is already paid.'], 422);
+        }
+
+        if (in_array($booking->status, ['cancelled', 'rejected'], true)) {
+            return response()->json(['error' => 'Cannot pay for a cancelled or rejected booking.'], 422);
+        }
+
+        $secret = config('services.stripe.secret');
+        if (!$secret) {
+            return response()->json(['error' => 'Stripe is not configured.'], 500);
+        }
+
+        $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173')), '/');
+
+        $response = Http::withToken($secret)
+            ->asForm()
+            ->post('https://api.stripe.com/v1/checkout/sessions', [
+                'mode' => 'payment',
+                'client_reference_id' => $booking->id,
+                'customer_email' => $user->email,
+                'success_url' => "{$frontendUrl}/bookings/{$booking->id}?payment=success&session_id={CHECKOUT_SESSION_ID}",
+                'cancel_url'  => "{$frontendUrl}/bookings/{$booking->id}?payment=cancelled",
+                'payment_method_types' => ['card'],
+                'metadata' => [
+                    'booking_id'     => $booking->id,
+                    'candidate_id'   => $booking->candidate_id,
+                    'interviewer_id' => $booking->interviewer_id,
+                ],
+                'line_items' => [[
+                    'quantity'   => 1,
+                    'price_data' => [
+                        'currency'     => strtolower($booking->currency),
+                        'unit_amount'  => (int) round($booking->amount * 100),
+                        'product_data' => [
+                            'name'        => 'Mock interview session',
+                            'description' => $booking->interviewer?->name
+                                ? "Interview with {$booking->interviewer->name}"
+                                : 'Technical interview session',
+                        ],
+                    ],
+                ]],
+            ]);
+
+        if ($response->failed()) {
+            Log::warning('Stripe API checkout session creation failed', [
+                'booking_id' => $booking->id,
+                'status'     => $response->status(),
+                'body'       => $response->json(),
+            ]);
+            return response()->json(['error' => 'Unable to start payment. Please try again.'], 502);
+        }
+
+        $session = $response->json();
+        $booking->update(['stripe_session_id' => $session['id'] ?? null]);
+
+        return response()->json(['url' => $session['url']]);
+    }
+
+    public function apiVerify(Request $request, string $bookingId): JsonResponse
+    {
+        $booking = Booking::with(['candidate', 'interviewer', 'submissions', 'evaluationReport'])
+            ->where('candidate_id', auth()->id())
+            ->findOrFail($bookingId);
+
+        if ($booking->payment_status === 'paid') {
+            return response()->json($booking);
+        }
+
+        $sessionId = $request->query('session_id') ?? $booking->stripe_session_id;
+
+        if (!$sessionId) {
+            return response()->json(['error' => 'No Stripe session found for this booking.'], 422);
+        }
+
+        $response = Http::withToken(config('services.stripe.secret'))
+            ->get("https://api.stripe.com/v1/checkout/sessions/{$sessionId}");
+
+        if ($response->failed()) {
+            return response()->json(['error' => 'Could not verify payment with Stripe.'], 502);
+        }
+
+        $session = $response->json();
+
+        if (($session['client_reference_id'] ?? null) !== $booking->id) {
+            return response()->json(['error' => 'Session does not match this booking.'], 422);
+        }
+
+        if (($session['payment_status'] ?? null) === 'paid') {
+            $booking->update([
+                'payment_status'    => 'paid',
+                'stripe_session_id' => $session['id'] ?? $sessionId,
+                'payment_intent_id' => $session['payment_intent'] ?? null,
+            ]);
+
+            return response()->json($booking->fresh(['candidate', 'interviewer', 'submissions', 'evaluationReport']));
+        }
+
+        return response()->json(['error' => 'Payment not completed yet.'], 402);
     }
 
     public function webhook(Request $request)
